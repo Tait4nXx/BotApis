@@ -22,14 +22,19 @@ class FastDownloader:
             'buffersize': 16 * 1024 * 1024,
             'http_chunk_size': 16 * 1024 * 1024,
             'continuedl': True,
-            # Add headers to avoid 403 errors
+            # Enhanced headers to avoid 403 errors
             'http_headers': {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-us,en;q=0.5',
-                'Accept-Encoding': 'gzip,deflate',
-                'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.7',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
                 'Connection': 'keep-alive',
+                'Referer': 'https://www.youtube.com/',
+                'Origin': 'https://www.youtube.com',
+                'Sec-Fetch-Dest': 'empty',
+                'Sec-Fetch-Mode': 'cors',
+                'Sec-Fetch-Site': 'same-site',
+                'DNT': '1',
             }
         }
     
@@ -39,20 +44,25 @@ class FastDownloader:
             opts = self.ydl_opts.copy()
             opts.update({
                 'format': 'bestaudio/best',
-                'extractaudio': True,
-                'audioformat': 'mp3',
                 'postprocessors': [{
                     'key': 'FFmpegExtractAudio',
                     'preferredcodec': 'mp3',
                     'preferredquality': quality,
                 }],
+                # Add extractor args specifically for audio
+                'extractor_args': {
+                    'youtube': {
+                        'skip': ['dash', 'hls'],
+                        'player_client': ['android_creator'],
+                    }
+                },
             })
             
             def sync_download():
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                     filename = ydl.prepare_filename(info)
-                    # Replace extension with .mp3
+                    # For audio, the file will be converted to mp3
                     base_name = os.path.splitext(filename)[0]
                     mp3_file = f"{base_name}.mp3"
                     
@@ -64,7 +74,11 @@ class FastDownloader:
                                 mp3_file = file
                                 break
                         else:
-                            raise FileNotFoundError("Downloaded file not found")
+                            # If still not found, try the original downloaded file
+                            if os.path.exists(filename):
+                                mp3_file = filename
+                            else:
+                                raise FileNotFoundError("Downloaded file not found")
                     
                     return mp3_file, info
             
