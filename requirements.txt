@@ -1,11 +1,10 @@
-pymongo
-motor
+pymongo==4.5.0
+motor==3.3.2
 python-telegram-bot==20.7
-yt-dlp==2023.11.16  # Specific stable version
-aiohttp
-aiofiles
-python-dotenv
-pytz
-requests
-flask
-ffmpeg-python
+yt-dlp==2023.11.16
+aiohttp==3.9.1
+aiofiles==23.2.1
+python-dotenv==1.0.0
+pytz==2023.3
+requests==2.31.0
+flask==2.3.3
