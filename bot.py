@@ -3,6 +3,8 @@ from telegram import Update, Bot
 from database import UserManager, KeyManager, RequestLogger
 import logging
 import os
+import random
+import string
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -14,6 +16,12 @@ LOG_GROUP = os.getenv("LOG_GROUP", "@TaitanXKeys")
 def is_admin(user_id):
     """Check if user is admin"""
     return user_id in ADMIN_IDS
+
+def generate_taitan_key():
+    """Generate random key in format Taitan{Random}"""
+    # Generate 12 random characters (uppercase letters and digits)
+    random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
+    return f"Taitan{random_part}"
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send a message when the command /start is issued."""
@@ -82,9 +90,22 @@ async def key_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Generate new key
+    # Generate new key automatically
     is_admin_user = is_admin(user_id)
-    api_key = KeyManager.generate_key(user_id, is_admin_user)
+    api_key = generate_taitan_key()
+    
+    # Save the generated key to database
+    KeyManager.add_key({
+        "key": api_key,
+        "user_id": user_id,
+        "is_admin": is_admin_user,
+        "is_active": True,
+        "created_at": datetime.utcnow(),
+        "expires_at": None if is_admin_user else datetime.utcnow().timestamp() + (7 * 24 * 60 * 60),
+        "total_requests": 0,
+        "daily_requests": 0,
+        "last_reset": datetime.utcnow()
+    })
     
     # Prepare message
     if is_admin_user:
@@ -122,6 +143,7 @@ async def key_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"**User:** {user.first_name} ({user.id})\n"
             f"**Username:** @{user.username}\n"
             f"**Status:** {admin_status}\n"
+            f"**Key:** `{api_key}`\n"
             f"**Time:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
         )
         await bot.send_message(chat_id=LOG_GROUP, text=log_message, parse_mode='Markdown')
@@ -149,8 +171,11 @@ async def showallkey_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         status = "🟢 Active" if key.get("is_active", True) else "🔴 Inactive"
         admin_flag = " 👑" if key.get("is_admin") else ""
         expires = key.get("expires_at", "Never")
-        if expires != "Never":
-            expires = expires.strftime("%Y-%m-%d")
+        if expires and expires != "Never":
+            if hasattr(expires, 'strftime'):
+                expires = expires.strftime("%Y-%m-%d")
+            else:
+                expires = str(expires)
         
         key_list.append(
             f"🔑 `{key['key']}`\n"
