@@ -1,7 +1,7 @@
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import logging
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,12 @@ class KeyManager:
     def generate_key(user_id, is_admin=False):
         """Generate API key"""
         import secrets
-        key = f"tx_{secrets.token_hex(16)}"
+        import random
+        import string
+        
+        # Generate key in Taitan{Random} format
+        random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
+        key = f"Taitan{random_part}"
         
         db = get_db()
         
@@ -90,7 +95,7 @@ class KeyManager:
             "expires_at": expires_at,
             "daily_requests": 0,
             "total_requests": 0,
-            "last_reset": datetime.utcnow().date(),
+            "last_reset": datetime.utcnow(),  # Store as datetime, not date
             "is_active": True
         }
         
@@ -113,10 +118,12 @@ class KeyManager:
         
         # Reset daily counter if new day
         today = datetime.utcnow().date()
-        if key_data["last_reset"] != today:
+        last_reset_date = key_data["last_reset"].date() if isinstance(key_data["last_reset"], datetime) else key_data["last_reset"]
+        
+        if last_reset_date != today:
             db.api_keys.update_one(
                 {"key": key}, 
-                {"$set": {"daily_requests": 0, "last_reset": today}}
+                {"$set": {"daily_requests": 0, "last_reset": datetime.utcnow()}}
             )
             key_data["daily_requests"] = 0
         
@@ -156,6 +163,15 @@ class KeyManager:
         """Get all keys for a user"""
         db = get_db()
         return list(db.api_keys.find({"user_id": user_id}))
+    
+    @staticmethod
+    def add_key(key_data):
+        """Add a key directly (for bot integration)"""
+        db = get_db()
+        key_data["created_at"] = datetime.utcnow()
+        if key_data.get("expires_at") and isinstance(key_data["expires_at"], (int, float)):
+            key_data["expires_at"] = datetime.utcfromtimestamp(key_data["expires_at"])
+        db.api_keys.insert_one(key_data)
 
 class RequestLogger:
     @staticmethod
@@ -167,7 +183,7 @@ class RequestLogger:
             "endpoint": endpoint,
             "success": success,
             "timestamp": datetime.utcnow(),
-            "date": datetime.utcnow().date()
+            "date": datetime.utcnow()  # Store as datetime
         })
     
     @staticmethod
@@ -175,13 +191,14 @@ class RequestLogger:
         """Get today's statistics"""
         db = get_db()
         today = datetime.utcnow().date()
+        start_of_day = datetime(today.year, today.month, today.day)
         
-        total_requests = db.requests.count_documents({"date": today})
+        total_requests = db.requests.count_documents({"date": {"$gte": start_of_day}})
         successful_requests = db.requests.count_documents({
-            "date": today, 
+            "date": {"$gte": start_of_day}, 
             "success": True
         })
-        unique_users = len(db.requests.distinct("user_id", {"date": today}))
+        unique_users = len(db.requests.distinct("user_id", {"date": {"$gte": start_of_day}}))
         
         return {
             "total_requests": total_requests,
