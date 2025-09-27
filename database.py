@@ -177,9 +177,6 @@ class RequestLogger:
     @staticmethod
     def log_request(user_id, endpoint, success=True, cached=False):
         """Log API request - Only log successful requests"""
-        if not success:
-            return  # Only log successful requests
-        
         db = get_db()
         db.requests.insert_one({
             "user_id": user_id,
@@ -192,19 +189,20 @@ class RequestLogger:
     
     @staticmethod
     def get_daily_stats():
-        """Get today's statistics - Only successful requests are logged"""
+        """Get today's statistics"""
         db = get_db()
         today = datetime.utcnow().date()
         
-        # Since we only log successful requests, all counts are for successful ones
         total_requests = db.requests.count_documents({"date": today})
         cached_requests = db.requests.count_documents({"date": today, "cached": True})
         fresh_requests = total_requests - cached_requests
+        successful_requests = db.requests.count_documents({"date": today, "success": True})
         unique_users = len(db.requests.distinct("user_id", {"date": today}))
         
         return {
             "total_requests": total_requests,
             "cached_requests": cached_requests,
             "fresh_requests": fresh_requests,
+            "successful_requests": successful_requests,
             "unique_users": unique_users
         }
