@@ -7,8 +7,8 @@ logger = logging.getLogger(__name__)
 
 class MongoCache:
     def __init__(self):
-        self.mongo_uri = os.getenv('MONGO_URI', 'mongodb+srv://VNI0X:iPIDqeYidbBQlZtG@vni0x.hykq8l4.mongodb.net/?retryWrites=true&w=majority&appName=VNI0X')
-        self.db_name = os.getenv('MONGO_DB_NAME', 'taitank_api')
+        self.mongo_uri = os.getenv('MONGODB_URI', 'mongodb+srv://VNI0X:iPIDqeYidbBQlZtG@vni0x.hykq8l4.mongodb.net/?retryWrites=true&w=majority&appName=VNI0X')
+        self.db_name = os.getenv('MONGO_DB_NAME', 'taitanx_bot')
         self.client = None
         self.db = None
         self.connect()
@@ -21,9 +21,9 @@ class MongoCache:
             # Create collections if they don't exist
             self.db.audio_cache.create_index("created_at", expireAfterSeconds=86400)  # 24 hours TTL
             self.db.video_cache.create_index("created_at", expireAfterSeconds=86400)  # 24 hours TTL
-            logger.info("Connected to MongoDB successfully")
+            logger.info("✅ Connected to MongoDB cache successfully")
         except Exception as e:
-            logger.error(f"MongoDB connection error: {e}")
+            logger.error(f"MongoDB cache connection error: {e}")
             self.client = None
             self.db = None
     
