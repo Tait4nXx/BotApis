@@ -1,10 +1,11 @@
 pymongo
 motor
 python-telegram-bot==20.7
-yt-dlp
+yt-dlp==2023.11.16  # Specific stable version
 aiohttp
 aiofiles
 python-dotenv
 pytz
 requests
 flask
+ffmpeg-python
