@@ -214,6 +214,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📈 **Today's Stats:**\n"
         f"   • Total Requests: {stats['total_requests']}\n"
         f"   • Successful: {stats['successful_requests']}\n"
+        f"   • Cached: {stats['cached_requests']}\n"
+        f"   • Fresh: {stats['fresh_requests']}\n"
         f"   • Unique Users: {stats['unique_users']}\n\n"
         f"⏰ Last updated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
     )
