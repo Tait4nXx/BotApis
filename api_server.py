@@ -17,7 +17,6 @@ CREATOR = "@Tait4nXx"
 TELEGRAM_CHANNEL = "https://t.me/VibeBots"
 TELEGRAM_BOT_TOKEN = "8403153728:AAGt5oeBupRaIfmGuyJBRHe8PA8teoKzigo"
 TELEGRAM_CHANNEL_ID = "@TaitanXApi"
-TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 TELEGRAM_FILE_API = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 
 # Configure logging
@@ -216,15 +215,15 @@ def audio_endpoint():
                 logger.info(f"🎵 Audio cache HIT for video_id: {video_id}")
                 # Increment request counter for cached response
                 KeyManager.increment_request(api_key)
-                if KeyManager.validate_key(api_key)[0]:
-                    RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=True)
+                if is_valid:
+                    RequestLogger.log_request(key_data['user_id'], '/audio', success=True, cached=True)
                 
                 return jsonify(format_cached_response(cached_response))
         
         logger.info(f"🎵 Audio cache MISS for video_id: {video_id}")
         
         # Process request asynchronously
-        result = asyncio.run(process_audio_request(youtube_url, video_id, api_key, start_time))
+        result = asyncio.run(process_audio_request(youtube_url, video_id, api_key, key_data, start_time))
         return jsonify(result)
         
     except Exception as e:
@@ -264,22 +263,22 @@ def video_endpoint():
                 logger.info(f"🎬 Video cache HIT for video_id: {video_id}")
                 # Increment request counter for cached response
                 KeyManager.increment_request(api_key)
-                if KeyManager.validate_key(api_key)[0]:
-                    RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=True)
+                if is_valid:
+                    RequestLogger.log_request(key_data['user_id'], '/video', success=True, cached=True)
                 
                 return jsonify(format_cached_response(cached_response))
         
         logger.info(f"🎬 Video cache MISS for video_id: {video_id}")
         
         # Process request asynchronously
-        result = asyncio.run(process_video_request(youtube_url, video_id, api_key, start_time))
+        result = asyncio.run(process_video_request(youtube_url, video_id, api_key, key_data, start_time))
         return jsonify(result)
         
     except Exception as e:
         logger.error(f"Video endpoint error: {e}")
         return jsonify(format_error_response("Internal server error", "Video")), 500
 
-async def process_audio_request(youtube_url, video_id, api_key, start_time):
+async def process_audio_request(youtube_url, video_id, api_key, key_data, start_time):
     """Process audio download request"""
     try:
         # Download audio
@@ -287,8 +286,7 @@ async def process_audio_request(youtube_url, video_id, api_key, start_time):
         
         if not download_result['success']:
             # Log failed request
-            if KeyManager.validate_key(api_key)[0]:
-                RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=False)
+            RequestLogger.log_request(key_data['user_id'], '/audio', success=False)
             return format_error_response(download_result['error'], "Audio")
         
         # Upload to Telegram
@@ -300,8 +298,7 @@ async def process_audio_request(youtube_url, video_id, api_key, start_time):
         if upload_result['success']:
             # Increment request counter and log success
             KeyManager.increment_request(api_key)
-            if KeyManager.validate_key(api_key)[0]:
-                RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=True)
+            RequestLogger.log_request(key_data['user_id'], '/audio', success=True)
             
             total_time = time.time() - start_time
             logger.info(f"🎵 Audio request completed in {total_time:.2f}s")
@@ -317,18 +314,16 @@ async def process_audio_request(youtube_url, video_id, api_key, start_time):
             return response
         else:
             # Log failed upload
-            if KeyManager.validate_key(api_key)[0]:
-                RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=False)
+            RequestLogger.log_request(key_data['user_id'], '/audio', success=False)
             return format_error_response(upload_result['error'], "Audio")
             
     except Exception as e:
         logger.error(f"Audio processing error: {e}")
         # Log error
-        if KeyManager.validate_key(api_key)[0]:
-            RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=False)
+        RequestLogger.log_request(key_data['user_id'], '/audio', success=False)
         return format_error_response(str(e), "Audio")
 
-async def process_video_request(youtube_url, video_id, api_key, start_time):
+async def process_video_request(youtube_url, video_id, api_key, key_data, start_time):
     """Process video download request"""
     try:
         # Download video (720p max for faster processing)
@@ -336,8 +331,7 @@ async def process_video_request(youtube_url, video_id, api_key, start_time):
         
         if not download_result['success']:
             # Log failed request
-            if KeyManager.validate_key(api_key)[0]:
-                RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=False)
+            RequestLogger.log_request(key_data['user_id'], '/video', success=False)
             return format_error_response(download_result['error'], "Video")
         
         # Upload to Telegram
@@ -349,8 +343,7 @@ async def process_video_request(youtube_url, video_id, api_key, start_time):
         if upload_result['success']:
             # Increment request counter and log success
             KeyManager.increment_request(api_key)
-            if KeyManager.validate_key(api_key)[0]:
-                RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=True)
+            RequestLogger.log_request(key_data['user_id'], '/video', success=True)
             
             total_time = time.time() - start_time
             logger.info(f"🎬 Video request completed in {total_time:.2f}s")
@@ -366,15 +359,13 @@ async def process_video_request(youtube_url, video_id, api_key, start_time):
             return response
         else:
             # Log failed upload
-            if KeyManager.validate_key(api_key)[0]:
-                RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=False)
+            RequestLogger.log_request(key_data['user_id'], '/video', success=False)
             return format_error_response(upload_result['error'], "Video")
             
     except Exception as e:
         logger.error(f"Video processing error: {e}")
         # Log error
-        if KeyManager.validate_key(api_key)[0]:
-            RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=False)
+        RequestLogger.log_request(key_data['user_id'], '/video', success=False)
         return format_error_response(str(e), "Video")
 
 @app.route('/cache/clear/<video_id>', methods=['DELETE'])
