@@ -1,0 +1,10 @@
+pymongo
+motor
+python-telegram-bot==20.7
+yt-dlp
+aiohttp
+aiofiles
+python-dotenv
+pytz
+requests
+flask
