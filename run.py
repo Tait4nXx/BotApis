@@ -1,32 +1,34 @@
-#!/usr/bin/env python3
-"""
-Run this file to start both Telegram Bot and API Server
-"""
-
-import threading
+from telegram.ext import Application
 import logging
-from main import main as bot_main
-from api_server import app as api_app
 import os
 from dotenv import load_dotenv
+from bot import setup_handlers
+from database import init_db
 
+# Load environment variables
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-def run_api():
-    """Run API server"""
-    host = os.getenv('API_SERVER_HOST', '0.0.0.0')
-    port = int(os.getenv('API_SERVER_PORT', 3000))
-    api_app.run(host=host, port=port, debug=False, use_reloader=False)
+def main():
+    """Start the bot"""
+    # Initialize database
+    init_db()
+    
+    # Create Telegram Bot Application
+    application = Application.builder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()
 
-if __name__ == "__main__":
-    logger.info("🚀 Starting TaitanX System...")
-    
-    # Start API server in background thread
-    api_thread = threading.Thread(target=run_api, daemon=True)
-    api_thread.start()
-    
-    # Start Telegram bot (main thread)
-    bot_main()
+    # Setup bot handlers
+    setup_handlers(application)
+
+    # Start the Bot
+    logger.info("🤖 Starting Telegram Bot...")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
