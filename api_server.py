@@ -9,6 +9,8 @@ import aiohttp
 from telegram import Bot
 import os
 import re
+import json
+from datetime import date, datetime
 
 app = Flask(__name__)
 
@@ -22,6 +24,15 @@ TELEGRAM_FILE_API = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("TaitanX-API")
+
+# Custom JSON encoder to handle date objects
+class CustomJSONEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (date, datetime)):
+            return obj.isoformat()
+        return super().default(obj)
+
+app.json_encoder = CustomJSONEncoder
 
 def extract_video_id(url):
     """Extract video ID from YouTube URL"""
