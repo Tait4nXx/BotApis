@@ -95,7 +95,7 @@ class KeyManager:
             "expires_at": expires_at,
             "daily_requests": 0,
             "total_requests": 0,
-            "last_reset": datetime.utcnow(),  # Store as datetime, not date
+            "last_reset": datetime.utcnow(),
             "is_active": True
         }
         
@@ -135,7 +135,7 @@ class KeyManager:
     
     @staticmethod
     def increment_request(key):
-        """Increment request counter"""
+        """Increment request counter - Only for successful requests"""
         db = get_db()
         db.api_keys.update_one(
             {"key": key},
@@ -176,28 +176,29 @@ class KeyManager:
 class RequestLogger:
     @staticmethod
     def log_request(user_id, endpoint, success=True):
-        """Log API request"""
+        """Log API request - Only log successful requests"""
+        if not success:
+            return  # Only log successful requests
+        
         db = get_db()
         db.requests.insert_one({
             "user_id": user_id,
             "endpoint": endpoint,
             "success": success,
             "timestamp": datetime.utcnow(),
-            "date": datetime.utcnow()  # Store as datetime
+            "date": datetime.utcnow()
         })
     
     @staticmethod
     def get_daily_stats():
-        """Get today's statistics"""
+        """Get today's statistics - Only successful requests are logged"""
         db = get_db()
         today = datetime.utcnow().date()
         start_of_day = datetime(today.year, today.month, today.day)
         
+        # Since we only log successful requests, all counts are for successful ones
         total_requests = db.requests.count_documents({"date": {"$gte": start_of_day}})
-        successful_requests = db.requests.count_documents({
-            "date": {"$gte": start_of_day}, 
-            "success": True
-        })
+        successful_requests = total_requests  # All logged requests are successful
         unique_users = len(db.requests.distinct("user_id", {"date": {"$gte": start_of_day}}))
         
         return {
