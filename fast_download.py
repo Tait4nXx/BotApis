@@ -1,22 +1,19 @@
 import asyncio
 import yt_dlp
 import os
-import aiohttp
-import aiofiles
-from datetime import datetime
 import logging
 import random
-import json
 import subprocess
 import sys
+from urllib.parse import urlparse, parse_qs
 
 logger = logging.getLogger(__name__)
 
 class FastDownloader:
     def __init__(self):
-        # Enhanced yt-dlp options without cookies
+        # Simple yt-dlp options without complex configurations
         self.ydl_opts = {
-            'quiet': False,
+            'quiet': True,
             'no_warnings': False,
             'ignoreerrors': True,
             'nocheckcertificate': True,
@@ -24,244 +21,26 @@ class FastDownloader:
             'restrictfilenames': True,
             'noplaylist': True,
             'socket_timeout': 30,
-            'retries': 10,
-            'fragment_retries': 10,
+            'retries': 3,
+            'fragment_retries': 3,
             'skip_unavailable_fragments': True,
             'keep_fragments': False,
-            'buffersize': 16 * 1024 * 1024,
-            'http_chunk_size': 16 * 1024 * 1024,
-            'continuedl': True,
-            
-            # Force IPV4 to avoid connection issues
             'forceipv4': True,
-            
-            # Bypass restrictions
-            'age_limit': 0,
-            'ignore_no_formats_error': True,
             'extract_flat': False,
-            
-            # Modern extractor args
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android', 'ios', 'web'],
-                    'player_skip': ['webpage'],
-                    'skip': ['dash', 'hls'],
-                }
-            },
-            
-            # Modern HTTP headers
-            'http_headers': self._get_modern_headers(),
         }
     
-    def _get_modern_headers(self):
-        """Get modern headers for 2024"""
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
-        ]
-        
+    def _get_simple_headers(self):
+        """Get simple headers"""
         return {
-            'User-Agent': random.choice(user_agents),
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'DNT': '1',
-            'Sec-GPC': '1',
         }
-    
-    def _get_mobile_headers(self):
-        """Get mobile headers"""
-        return {
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 10; SM-G975F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-            'Accept': '*/*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'X-Requested-With': 'com.google.android.youtube',
-        }
-    
-    def _get_enhanced_ytdl_options(self, media_type='audio'):
-        """Get enhanced options for specific media type"""
-        opts = self.ydl_opts.copy()
-        
-        if media_type == 'audio':
-            opts.update({
-                'format': 'bestaudio/best',
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-            })
-        else:  # video
-            opts.update({
-                'format': 'best[height<=720]/best[height<=480]/best',
-            })
-        
-        return opts
-    
-    async def _extract_info_with_fallback(self, url, opts):
-        """Enhanced extraction with multiple fallback methods"""
-        methods = [
-            self._extract_simple,
-            self._extract_with_mobile_headers,
-            self._extract_with_embed,
-        ]
-        
-        last_error = None
-        for method in methods:
-            try:
-                logger.info(f"Trying extraction method: {method.__name__}")
-                result = await method(url, opts)
-                if result and result.get('formats'):
-                    logger.info(f"Success with method: {method.__name__}")
-                    return result
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Method {method.__name__} failed: {e}")
-                continue
-        
-        # Final fallback: try with minimal options
-        try:
-            return await self._extract_minimal(url)
-        except Exception as e:
-            last_error = e
-        
-        raise Exception(f"All extraction methods failed. Last error: {last_error}")
-    
-    async def _extract_simple(self, url, opts):
-        """Simple extraction without complex options"""
-        simple_opts = {
-            'quiet': True,
-            'no_warnings': False,
-            'ignoreerrors': True,
-            'forceipv4': True,
-            'extract_flat': False,
-            'http_headers': self._get_modern_headers(),
-        }
-        
-        def sync_extract():
-            with yt_dlp.YoutubeDL(simple_opts) as ydl:
-                return ydl.extract_info(url, download=False)
-        
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, sync_extract)
-    
-    async def _extract_with_mobile_headers(self, url, opts):
-        """Extract using mobile headers"""
-        mobile_opts = opts.copy()
-        mobile_opts.update({
-            'http_headers': self._get_mobile_headers(),
-        })
-        
-        def sync_extract():
-            with yt_dlp.YoutubeDL(mobile_opts) as ydl:
-                return ydl.extract_info(url, download=False)
-        
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, sync_extract)
-    
-    async def _extract_with_embed(self, url, opts):
-        """Extract using embed URL"""
-        if 'youtube.com/watch?v=' in url:
-            video_id = url.split('v=')[1].split('&')[0]
-            embed_url = f'https://www.youtube.com/embed/{video_id}'
-            
-            def sync_extract():
-                simple_opts = {
-                    'quiet': True,
-                    'no_warnings': False,
-                    'ignoreerrors': True,
-                    'forceipv4': True,
-                }
-                with yt_dlp.YoutubeDL(simple_opts) as ydl:
-                    return ydl.extract_info(embed_url, download=False)
-            
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(None, sync_extract)
-        return None
-    
-    async def _extract_minimal(self, url):
-        """Minimal extraction as last resort"""
-        minimal_opts = {
-            'quiet': True,
-            'no_warnings': False,
-            'ignoreerrors': True,
-            'forceipv4': True,
-            'extract_flat': False,
-        }
-        
-        def sync_extract():
-            with yt_dlp.YoutubeDL(minimal_opts) as ydl:
-                return ydl.extract_info(url, download=False)
-        
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, sync_extract)
-    
-    async def download_audio(self, url, quality='192'):
-        """Download audio with enhanced error handling"""
-        try:
-            # Update yt-dlp first
-            await self._update_yt_dlp()
-            
-            opts = self._get_enhanced_ytdl_options('audio')
-            
-            # Extract info first with fallback
-            info = await self._extract_info_with_fallback(url, opts)
-            
-            if not info:
-                return {'success': False, 'error': 'Failed to extract video information'}
-            
-            # Download with progress tracking
-            def sync_download():
-                with yt_dlp.YoutubeDL(opts) as ydl:
-                    # Add progress hooks
-                    ydl.add_progress_hook(self._progress_hook)
-                    
-                    download_info = ydl.extract_info(url, download=True)
-                    filename = ydl.prepare_filename(download_info)
-                    
-                    # Find the actual file
-                    base_name = os.path.splitext(filename)[0]
-                    mp3_file = f"{base_name}.mp3"
-                    
-                    possible_files = [mp3_file, filename]
-                    for file in os.listdir('.'):
-                        if file.startswith(base_name) and not file.endswith('.part'):
-                            possible_files.append(file)
-                    
-                    for file_path in possible_files:
-                        if os.path.exists(file_path):
-                            return file_path, download_info
-                    
-                    raise FileNotFoundError("Downloaded file not found")
-            
-            loop = asyncio.get_event_loop()
-            file_path, download_info = await loop.run_in_executor(None, sync_download)
-            
-            return {
-                'success': True,
-                'file_path': file_path,
-                'title': download_info.get('title', 'Unknown'),
-                'duration': download_info.get('duration', 0),
-                'thumbnail': download_info.get('thumbnail', '')
-            }
-            
-        except Exception as e:
-            logger.error(f"Audio download error for {url}: {e}")
-            return {'success': False, 'error': str(e)}
     
     async def _update_yt_dlp(self):
-        """Update yt-dlp to latest version"""
+        """Force update yt-dlp"""
         try:
-            # Update yt-dlp using pip
+            logger.info("🔄 Updating yt-dlp...")
             result = subprocess.run([
                 sys.executable, '-m', 'pip', 'install', '--upgrade', 'yt-dlp', '--no-cache-dir'
             ], capture_output=True, text=True, timeout=120)
@@ -269,67 +48,221 @@ class FastDownloader:
             if result.returncode == 0:
                 logger.info("✅ yt-dlp updated successfully")
             else:
-                logger.warning(f"yt-dlp update may have failed: {result.stderr}")
-                
-        except subprocess.TimeoutExpired:
-            logger.warning("yt-dlp update timed out")
+                logger.warning(f"yt-dlp update failed: {result.stderr}")
         except Exception as e:
             logger.warning(f"Could not update yt-dlp: {e}")
     
-    def _progress_hook(self, d):
-        """Progress hook for downloads"""
-        if d['status'] == 'downloading':
-            percent = d.get('_percent_str', 'N/A')
-            speed = d.get('_speed_str', 'N/A')
-            logger.info(f"Download progress: {percent} at {speed}")
-        elif d['status'] == 'finished':
-            logger.info("Download completed, starting post-processing")
-    
-    async def download_video(self, url, quality='best[height<=720]'):
-        """Download video with enhanced error handling"""
+    async def _try_direct_download(self, url, media_type, quality=None):
+        """Try direct download without extraction first"""
         try:
-            # Update yt-dlp first
-            await self._update_yt_dlp()
+            opts = self.ydl_opts.copy()
             
-            opts = self._get_enhanced_ytdl_options('video')
-            opts['format'] = quality
+            if media_type == 'audio':
+                opts.update({
+                    'format': 'bestaudio/best',
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': quality or '192',
+                    }],
+                })
+            else:  # video
+                opts.update({
+                    'format': quality or 'best[height<=720]/best[height<=480]/best',
+                })
             
-            # Extract info first with fallback
-            info = await self._extract_info_with_fallback(url, opts)
-            
-            if not info:
-                return {'success': False, 'error': 'Failed to extract video information'}
-            
-            # Download
             def sync_download():
                 with yt_dlp.YoutubeDL(opts) as ydl:
-                    ydl.add_progress_hook(self._progress_hook)
-                    
-                    download_info = ydl.extract_info(url, download=True)
-                    filename = ydl.prepare_filename(download_info)
-                    
-                    if not os.path.exists(filename):
+                    # Try direct download without pre-extraction
+                    try:
+                        info = ydl.extract_info(url, download=True)
+                        filename = ydl.prepare_filename(info)
+                        
+                        # Find the actual file
+                        if media_type == 'audio':
+                            base_name = os.path.splitext(filename)[0]
+                            mp3_file = f"{base_name}.mp3"
+                            if os.path.exists(mp3_file):
+                                return mp3_file, info
+                        
+                        if os.path.exists(filename):
+                            return filename, info
+                        
+                        # Search for file
                         base_name = os.path.splitext(filename)[0]
                         for file in os.listdir('.'):
                             if file.startswith(base_name) and not file.endswith('.part'):
-                                filename = file
-                                break
-                        else:
-                            raise FileNotFoundError("Downloaded file not found")
-                    
-                    return filename, download_info
+                                return file, info
+                        
+                        return None, None
+                        
+                    except Exception as e:
+                        logger.error(f"Direct download failed: {e}")
+                        return None, None
             
             loop = asyncio.get_event_loop()
-            file_path, download_info = await loop.run_in_executor(None, sync_download)
+            file_path, info = await loop.run_in_executor(None, sync_download)
             
-            return {
-                'success': True,
-                'file_path': file_path,
-                'title': download_info.get('title', 'Unknown'),
-                'duration': download_info.get('duration', 0),
-                'thumbnail': download_info.get('thumbnail', ''),
-                'resolution': download_info.get('resolution', 'Unknown')
-            }
+            if file_path and info:
+                return {
+                    'success': True,
+                    'file_path': file_path,
+                    'title': info.get('title', 'Unknown'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'resolution': info.get('resolution', 'Unknown') if media_type == 'video' else '192kbps'
+                }
+            return {'success': False, 'error': 'Direct download failed'}
+            
+        except Exception as e:
+            logger.error(f"Direct download error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def _try_alternative_methods(self, url, media_type, quality=None):
+        """Try alternative download methods"""
+        methods = [
+            self._try_with_simple_opts,
+            self._try_with_best_format,
+            self._try_with_worst_format,  # Sometimes lower quality works better
+        ]
+        
+        for method in methods:
+            try:
+                result = await method(url, media_type, quality)
+                if result['success']:
+                    logger.info(f"✅ Success with method: {method.__name__}")
+                    return result
+            except Exception as e:
+                logger.warning(f"Method {method.__name__} failed: {e}")
+                continue
+        
+        return {'success': False, 'error': 'All alternative methods failed'}
+    
+    async def _try_with_simple_opts(self, url, media_type, quality=None):
+        """Try with simplest possible options"""
+        opts = {
+            'quiet': True,
+            'no_warnings': False,
+            'ignoreerrors': True,
+            'forceipv4': True,
+            'outtmpl': '%(title).50s.%(ext)s',
+        }
+        
+        if media_type == 'audio':
+            opts['format'] = 'bestaudio'
+            opts['postprocessors'] = [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }]
+        else:
+            opts['format'] = 'worst[height>=360]'  # Try lower quality first
+        
+        return await self._download_with_opts(url, opts, media_type)
+    
+    async def _try_with_best_format(self, url, media_type, quality=None):
+        """Try with best format"""
+        opts = self.ydl_opts.copy()
+        
+        if media_type == 'audio':
+            opts['format'] = 'bestaudio'
+            opts['postprocessors'] = [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }]
+        else:
+            opts['format'] = 'best[height<=480]'  # Medium quality
+        
+        return await self._download_with_opts(url, opts, media_type)
+    
+    async def _try_with_worst_format(self, url, media_type, quality=None):
+        """Try with worst format (sometimes works better)"""
+        opts = self.ydl_opts.copy()
+        
+        if media_type == 'audio':
+            opts['format'] = 'worstaudio'
+            opts['postprocessors'] = [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+            }]
+        else:
+            opts['format'] = 'worst[height>=240]'
+        
+        return await self._download_with_opts(url, opts, media_type)
+    
+    async def _download_with_opts(self, url, opts, media_type):
+        """Download with given options"""
+        try:
+            def sync_download():
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    filename = ydl.prepare_filename(info)
+                    
+                    if os.path.exists(filename):
+                        return filename, info
+                    
+                    # Search for file
+                    base_name = os.path.splitext(filename)[0]
+                    for file in os.listdir('.'):
+                        if file.startswith(base_name) and not file.endswith('.part'):
+                            return file, info
+                    
+                    return None, None
+            
+            loop = asyncio.get_event_loop()
+            file_path, info = await loop.run_in_executor(None, sync_download)
+            
+            if file_path and info:
+                return {
+                    'success': True,
+                    'file_path': file_path,
+                    'title': info.get('title', 'Unknown'),
+                    'duration': info.get('duration', 0),
+                    'thumbnail': info.get('thumbnail', ''),
+                    'resolution': info.get('resolution', 'Unknown') if media_type == 'video' else '192kbps'
+                }
+            return {'success': False, 'error': 'Download failed'}
+            
+        except Exception as e:
+            logger.error(f"Download with opts error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def download_audio(self, url, quality='192'):
+        """Download audio with multiple fallback methods"""
+        try:
+            await self._update_yt_dlp()
+            
+            # Try direct download first
+            result = await self._try_direct_download(url, 'audio', quality)
+            if result['success']:
+                return result
+            
+            # Try alternative methods
+            result = await self._try_alternative_methods(url, 'audio', quality)
+            if result['success']:
+                return result
+            
+            return {'success': False, 'error': 'All audio download methods failed'}
+            
+        except Exception as e:
+            logger.error(f"Audio download error for {url}: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def download_video(self, url, quality='best[height<=720]'):
+        """Download video with multiple fallback methods"""
+        try:
+            await self._update_yt_dlp()
+            
+            # Try direct download first
+            result = await self._try_direct_download(url, 'video', quality)
+            if result['success']:
+                return result
+            
+            # Try alternative methods
+            result = await self._try_alternative_methods(url, 'video', quality)
+            if result['success']:
+                return result
+            
+            return {'success': False, 'error': 'All video download methods failed'}
             
         except Exception as e:
             logger.error(f"Video download error for {url}: {e}")
@@ -338,7 +271,7 @@ class FastDownloader:
     async def cleanup_file(self, file_path):
         """Cleanup downloaded file"""
         try:
-            if os.path.exists(file_path):
+            if file_path and os.path.exists(file_path):
                 os.remove(file_path)
                 logger.info(f"Cleaned up file: {file_path}")
         except Exception as e:
