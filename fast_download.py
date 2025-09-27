@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class FastDownloader:
     def __init__(self):
-        # Enhanced yt-dlp options with modern configurations
+        # Enhanced yt-dlp options without cookies
         self.ydl_opts = {
             'quiet': False,
             'no_warnings': False,
@@ -32,10 +32,6 @@ class FastDownloader:
             'http_chunk_size': 16 * 1024 * 1024,
             'continuedl': True,
             
-            # Cookie support
-            'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
-            'cookiesfrombrowser': ('chrome',) if not os.path.exists('cookies.txt') else None,
-            
             # Force IPV4 to avoid connection issues
             'forceipv4': True,
             
@@ -47,8 +43,8 @@ class FastDownloader:
             # Modern extractor args
             'extractor_args': {
                 'youtube': {
-                    'player_client': ['android_creator', 'android', 'ios', 'web'],
-                    'player_skip': ['webpage', 'configs'],
+                    'player_client': ['android', 'ios', 'web'],
+                    'player_skip': ['webpage'],
                     'skip': ['dash', 'hls'],
                 }
             },
@@ -114,10 +110,9 @@ class FastDownloader:
     async def _extract_info_with_fallback(self, url, opts):
         """Enhanced extraction with multiple fallback methods"""
         methods = [
-            self._extract_with_modern_headers,
-            self._extract_with_mobile_client,
+            self._extract_simple,
+            self._extract_with_mobile_headers,
             self._extract_with_embed,
-            self._extract_with_invidious,
         ]
         
         last_error = None
@@ -141,38 +136,28 @@ class FastDownloader:
         
         raise Exception(f"All extraction methods failed. Last error: {last_error}")
     
-    async def _extract_with_modern_headers(self, url, opts):
-        """Extract with modern headers and client configurations"""
-        modern_opts = opts.copy()
-        modern_opts.update({
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android_creator', 'android', 'ios', 'web'],
-                    'player_skip': ['webpage', 'configs'],
-                    'skip': ['dash', 'hls'],
-                }
-            },
+    async def _extract_simple(self, url, opts):
+        """Simple extraction without complex options"""
+        simple_opts = {
+            'quiet': True,
+            'no_warnings': False,
+            'ignoreerrors': True,
+            'forceipv4': True,
+            'extract_flat': False,
             'http_headers': self._get_modern_headers(),
-        })
+        }
         
         def sync_extract():
-            with yt_dlp.YoutubeDL(modern_opts) as ydl:
+            with yt_dlp.YoutubeDL(simple_opts) as ydl:
                 return ydl.extract_info(url, download=False)
         
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, sync_extract)
     
-    async def _extract_with_mobile_client(self, url, opts):
-        """Extract using mobile client configuration"""
+    async def _extract_with_mobile_headers(self, url, opts):
+        """Extract using mobile headers"""
         mobile_opts = opts.copy()
         mobile_opts.update({
-            'extractor_args': {
-                'youtube': {
-                    'player_client': ['android_embedded', 'android', 'ios_embedded'],
-                    'player_skip': ['webpage'],
-                    'skip': ['dash', 'hls'],
-                }
-            },
             'http_headers': self._get_mobile_headers(),
         })
         
@@ -190,38 +175,17 @@ class FastDownloader:
             embed_url = f'https://www.youtube.com/embed/{video_id}'
             
             def sync_extract():
-                with yt_dlp.YoutubeDL(opts) as ydl:
+                simple_opts = {
+                    'quiet': True,
+                    'no_warnings': False,
+                    'ignoreerrors': True,
+                    'forceipv4': True,
+                }
+                with yt_dlp.YoutubeDL(simple_opts) as ydl:
                     return ydl.extract_info(embed_url, download=False)
             
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, sync_extract)
-        return None
-    
-    async def _extract_with_invidious(self, url, opts):
-        """Extract using Invidious as fallback"""
-        if 'youtube.com/watch?v=' in url:
-            video_id = url.split('v=')[1].split('&')[0]
-            invidious_instances = [
-                'https://invidious.snopyta.org',
-                'https://yewtu.be',
-                'https://inv.riverside.rocks',
-                'https://invidious.osi.kr',
-            ]
-            
-            for instance in invidious_instances:
-                try:
-                    invidious_url = f'{instance}/watch?v={video_id}'
-                    
-                    def sync_extract():
-                        with yt_dlp.YoutubeDL(opts) as ydl:
-                            return ydl.extract_info(invidious_url, download=False)
-                    
-                    loop = asyncio.get_event_loop()
-                    result = await loop.run_in_executor(None, sync_extract)
-                    if result:
-                        return result
-                except:
-                    continue
         return None
     
     async def _extract_minimal(self, url):
@@ -232,7 +196,6 @@ class FastDownloader:
             'ignoreerrors': True,
             'forceipv4': True,
             'extract_flat': False,
-            'http_headers': self._get_modern_headers(),
         }
         
         def sync_extract():
@@ -245,8 +208,8 @@ class FastDownloader:
     async def download_audio(self, url, quality='192'):
         """Download audio with enhanced error handling"""
         try:
-            # Force update yt-dlp first
-            await self._force_update_yt_dlp()
+            # Update yt-dlp first
+            await self._update_yt_dlp()
             
             opts = self._get_enhanced_ytdl_options('audio')
             
@@ -295,13 +258,13 @@ class FastDownloader:
             logger.error(f"Audio download error for {url}: {e}")
             return {'success': False, 'error': str(e)}
     
-    async def _force_update_yt_dlp(self):
-        """Force update yt-dlp to latest version"""
+    async def _update_yt_dlp(self):
+        """Update yt-dlp to latest version"""
         try:
             # Update yt-dlp using pip
             result = subprocess.run([
-                sys.executable, '-m', 'pip', 'install', '--upgrade', 'yt-dlp'
-            ], capture_output=True, text=True, timeout=60)
+                sys.executable, '-m', 'pip', 'install', '--upgrade', 'yt-dlp', '--no-cache-dir'
+            ], capture_output=True, text=True, timeout=120)
             
             if result.returncode == 0:
                 logger.info("✅ yt-dlp updated successfully")
@@ -325,8 +288,8 @@ class FastDownloader:
     async def download_video(self, url, quality='best[height<=720]'):
         """Download video with enhanced error handling"""
         try:
-            # Force update yt-dlp first
-            await self._force_update_yt_dlp()
+            # Update yt-dlp first
+            await self._update_yt_dlp()
             
             opts = self._get_enhanced_ytdl_options('video')
             opts['format'] = quality
