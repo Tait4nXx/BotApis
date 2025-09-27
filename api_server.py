@@ -11,6 +11,7 @@ import os
 import re
 import json
 from datetime import date, datetime
+import traceback
 
 app = Flask(__name__)
 
@@ -37,7 +38,7 @@ app.json_encoder = CustomJSONEncoder
 def extract_video_id(url):
     """Extract video ID from YouTube URL"""
     if url.startswith('ytsearch:'):
-        return f"search_{hash(url)}"  # Unique ID for searches
+        return f"search_{hash(url)}"
     
     patterns = [
         r'(?:v=|\/)([0-9A-Za-z_-]{11}).*',
@@ -57,10 +58,9 @@ def get_youtube_url(url_param, name_param):
     if url_param:
         if 'youtube.com' in url_param or 'youtu.be' in url_param:
             return url_param
-        elif len(url_param) == 11:  # Video ID
+        elif len(url_param) == 11:
             return f"https://youtube.com/watch?v={url_param}"
     elif name_param:
-        # Search for video by name
         return f"ytsearch:{name_param}"
     
     return None
@@ -68,6 +68,9 @@ def get_youtube_url(url_param, name_param):
 async def upload_to_telegram(file_path, file_type="audio"):
     """Upload file to Telegram and get direct file URL"""
     try:
+        if not file_path or not os.path.exists(file_path):
+            return {'success': False, 'error': 'File not found for upload'}
+            
         bot = Bot(token=TELEGRAM_BOT_TOKEN)
         
         if file_type == "audio":
@@ -78,8 +81,6 @@ async def upload_to_telegram(file_path, file_type="audio"):
                     caption="🎵 Downloaded via TaitanX API"
                 )
                 file_id = message.audio.file_id
-                
-                # Get file info for direct URL
                 file_info = await bot.get_file(file_id)
                 download_url = f"{TELEGRAM_FILE_API}/{file_info.file_path}"
                 
@@ -90,7 +91,7 @@ async def upload_to_telegram(file_path, file_type="audio"):
                     'msg_id': message.message_id,
                     'duration': message.audio.duration
                 }
-        else:  # video
+        else:
             with open(file_path, 'rb') as file:
                 message = await bot.send_video(
                     chat_id=TELEGRAM_CHANNEL_ID,
@@ -99,8 +100,6 @@ async def upload_to_telegram(file_path, file_type="audio"):
                     supports_streaming=True
                 )
                 file_id = message.video.file_id
-                
-                # Get file info for direct URL
                 file_info = await bot.get_file(file_id)
                 download_url = f"{TELEGRAM_FILE_API}/{file_info.file_path}"
                 
@@ -117,7 +116,7 @@ async def upload_to_telegram(file_path, file_type="audio"):
         return {'success': False, 'error': str(e)}
 
 def format_duration(duration_seconds):
-    """Convert seconds to ISO 8601 duration format (PT3M14S)"""
+    """Convert seconds to ISO 8601 duration format"""
     if not duration_seconds:
         return "PT0S"
     
@@ -136,7 +135,7 @@ def format_duration(duration_seconds):
     return duration_str
 
 def format_success_response(file_type, upload_result, download_result, total_time, title="Unknown"):
-    """Format success response as requested"""
+    """Format success response"""
     duration = format_duration(upload_result.get('duration', download_result.get('duration', 0)))
     
     response = {
@@ -164,7 +163,6 @@ def format_success_response(file_type, upload_result, download_result, total_tim
 def format_cached_response(cached_response):
     """Format cached response"""
     if cached_response:
-        # Mark as cached response
         cached_response['cached'] = True
         cached_response['cache_timestamp'] = time.time()
         return cached_response
@@ -193,52 +191,56 @@ def format_error_response(message, file_type="Audio"):
         "cached": False
     }
 
+def validate_api_key(api_key):
+    """Validate API key and return key data"""
+    if not api_key:
+        return False, "Missing API key"
+    
+    is_valid, key_data = KeyManager.validate_key(api_key)
+    if not is_valid:
+        return False, key_data
+    
+    return True, key_data
+
 @app.route('/audio', methods=['GET'])
 def audio_endpoint():
     """Audio download endpoint"""
     start_time = time.time()
     
     try:
-        # Get parameters
         url = request.args.get('url', '')
         name = request.args.get('name', '')
         api_key = request.args.get('api_key', '')
         
         # Validate API key
-        if not api_key:
-            return jsonify(format_error_response("Missing api_key parameter", "Audio")), 400
-        
-        is_valid, key_data = KeyManager.validate_key(api_key)
+        is_valid, key_data_or_error = validate_api_key(api_key)
         if not is_valid:
-            return jsonify(format_error_response(key_data, "Audio")), 401
+            return jsonify(format_error_response(key_data_or_error, "Audio")), 401
         
-        # Get YouTube URL and video ID
+        # Get YouTube URL
         youtube_url = get_youtube_url(url, name)
         if not youtube_url:
             return jsonify(format_error_response("Missing url or name parameter", "Audio")), 400
         
         video_id = extract_video_id(youtube_url)
         
-        # Check cache first (skip for search results)
+        # Check cache
         if not youtube_url.startswith('ytsearch:'):
             cached_response = cache_db.get_audio_cache(video_id)
             if cached_response:
                 logger.info(f"🎵 Audio cache HIT for video_id: {video_id}")
-                # Increment request counter for cached response
                 KeyManager.increment_request(api_key)
-                if is_valid:
-                    RequestLogger.log_request(key_data['user_id'], '/audio', success=True, cached=True)
-                
+                RequestLogger.log_request(key_data_or_error['user_id'], '/audio', success=True, cached=True)
                 return jsonify(format_cached_response(cached_response))
         
         logger.info(f"🎵 Audio cache MISS for video_id: {video_id}")
         
-        # Process request asynchronously
-        result = asyncio.run(process_audio_request(youtube_url, video_id, api_key, key_data, start_time))
+        # Process request
+        result = asyncio.run(process_audio_request(youtube_url, video_id, api_key, key_data_or_error, start_time))
         return jsonify(result)
         
     except Exception as e:
-        logger.error(f"Audio endpoint error: {e}")
+        logger.error(f"Audio endpoint error: {traceback.format_exc()}")
         return jsonify(format_error_response("Internal server error", "Audio")), 500
 
 @app.route('/video', methods=['GET'])
@@ -247,46 +249,39 @@ def video_endpoint():
     start_time = time.time()
     
     try:
-        # Get parameters
         url = request.args.get('url', '')
         name = request.args.get('name', '')
         api_key = request.args.get('api_key', '')
         
         # Validate API key
-        if not api_key:
-            return jsonify(format_error_response("Missing api_key parameter", "Video")), 400
-        
-        is_valid, key_data = KeyManager.validate_key(api_key)
+        is_valid, key_data_or_error = validate_api_key(api_key)
         if not is_valid:
-            return jsonify(format_error_response(key_data, "Video")), 401
+            return jsonify(format_error_response(key_data_or_error, "Video")), 401
         
-        # Get YouTube URL and video ID
+        # Get YouTube URL
         youtube_url = get_youtube_url(url, name)
         if not youtube_url:
             return jsonify(format_error_response("Missing url or name parameter", "Video")), 400
         
         video_id = extract_video_id(youtube_url)
         
-        # Check cache first (skip for search results)
+        # Check cache
         if not youtube_url.startswith('ytsearch:'):
             cached_response = cache_db.get_video_cache(video_id)
             if cached_response:
                 logger.info(f"🎬 Video cache HIT for video_id: {video_id}")
-                # Increment request counter for cached response
                 KeyManager.increment_request(api_key)
-                if is_valid:
-                    RequestLogger.log_request(key_data['user_id'], '/video', success=True, cached=True)
-                
+                RequestLogger.log_request(key_data_or_error['user_id'], '/video', success=True, cached=True)
                 return jsonify(format_cached_response(cached_response))
         
         logger.info(f"🎬 Video cache MISS for video_id: {video_id}")
         
-        # Process request asynchronously
-        result = asyncio.run(process_video_request(youtube_url, video_id, api_key, key_data, start_time))
+        # Process request
+        result = asyncio.run(process_video_request(youtube_url, video_id, api_key, key_data_or_error, start_time))
         return jsonify(result)
         
     except Exception as e:
-        logger.error(f"Video endpoint error: {e}")
+        logger.error(f"Video endpoint error: {traceback.format_exc()}")
         return jsonify(format_error_response("Internal server error", "Video")), 500
 
 async def process_audio_request(youtube_url, video_id, api_key, key_data, start_time):
@@ -296,89 +291,80 @@ async def process_audio_request(youtube_url, video_id, api_key, key_data, start_
         download_result = await downloader.download_audio(youtube_url, '192')
         
         if not download_result['success']:
-            # Log failed request
             RequestLogger.log_request(key_data['user_id'], '/audio', success=False)
-            return format_error_response(download_result['error'], "Audio")
+            return format_error_response(f"Download failed: {download_result['error']}", "Audio")
         
         # Upload to Telegram
         upload_result = await upload_to_telegram(download_result['file_path'], "audio")
         
-        # Cleanup file immediately after upload
+        # Cleanup file
         await downloader.cleanup_file(download_result['file_path'])
         
         if upload_result['success']:
-            # Increment request counter and log success
             KeyManager.increment_request(api_key)
             RequestLogger.log_request(key_data['user_id'], '/audio', success=True)
             
             total_time = time.time() - start_time
             logger.info(f"🎵 Audio request completed in {total_time:.2f}s")
             
-            # Format response
             response = format_success_response("Audio", upload_result, download_result, total_time, download_result.get('title', 'Unknown'))
             
-            # Cache the response if not a search result
+            # Cache the response
             if not youtube_url.startswith('ytsearch:'):
                 cache_db.set_audio_cache(video_id, response)
                 logger.info(f"🎵 Audio response cached for video_id: {video_id}")
             
             return response
         else:
-            # Log failed upload
             RequestLogger.log_request(key_data['user_id'], '/audio', success=False)
-            return format_error_response(upload_result['error'], "Audio")
+            return format_error_response(f"Upload failed: {upload_result['error']}", "Audio")
             
     except Exception as e:
-        logger.error(f"Audio processing error: {e}")
-        # Log error
+        logger.error(f"Audio processing error: {traceback.format_exc()}")
         RequestLogger.log_request(key_data['user_id'], '/audio', success=False)
         return format_error_response(str(e), "Audio")
 
 async def process_video_request(youtube_url, video_id, api_key, key_data, start_time):
     """Process video download request"""
     try:
-        # Download video (720p max for faster processing)
+        # Download video
         download_result = await downloader.download_video(youtube_url, 'best[height<=720]')
         
         if not download_result['success']:
-            # Log failed request
             RequestLogger.log_request(key_data['user_id'], '/video', success=False)
-            return format_error_response(download_result['error'], "Video")
+            return format_error_response(f"Download failed: {download_result['error']}", "Video")
         
         # Upload to Telegram
         upload_result = await upload_to_telegram(download_result['file_path'], "video")
         
-        # Cleanup file immediately after upload
+        # Cleanup file
         await downloader.cleanup_file(download_result['file_path'])
         
         if upload_result['success']:
-            # Increment request counter and log success
             KeyManager.increment_request(api_key)
             RequestLogger.log_request(key_data['user_id'], '/video', success=True)
             
             total_time = time.time() - start_time
             logger.info(f"🎬 Video request completed in {total_time:.2f}s")
             
-            # Format response
             response = format_success_response("Video", upload_result, download_result, total_time, download_result.get('title', 'Unknown'))
             
-            # Cache the response if not a search result
+            # Cache the response
             if not youtube_url.startswith('ytsearch:'):
                 cache_db.set_video_cache(video_id, response)
                 logger.info(f"🎬 Video response cached for video_id: {video_id}")
             
             return response
         else:
-            # Log failed upload
             RequestLogger.log_request(key_data['user_id'], '/video', success=False)
-            return format_error_response(upload_result['error'], "Video")
+            return format_error_response(f"Upload failed: {upload_result['error']}", "Video")
             
     except Exception as e:
-        logger.error(f"Video processing error: {e}")
-        # Log error
+        logger.error(f"Video processing error: {traceback.format_exc()}")
         RequestLogger.log_request(key_data['user_id'], '/video', success=False)
         return format_error_response(str(e), "Video")
 
+# Other routes remain the same...
 @app.route('/cache/clear/<video_id>', methods=['DELETE'])
 def clear_cache(video_id):
     """Clear cache for specific video ID"""
@@ -449,5 +435,4 @@ if __name__ == '__main__':
     port = int(os.getenv('API_SERVER_PORT', 3000))
     
     logger.info(f"🚀 TaitanX API Server starting on {host}:{port}")
-    logger.info("📊 MongoDB caching enabled")
     app.run(host=host, port=port, debug=False)
