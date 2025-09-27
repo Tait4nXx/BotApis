@@ -53,39 +53,53 @@ def get_youtube_url(url_param, name_param):
 async def upload_to_telegram(file_path, file_type="audio"):
     """Upload file to Telegram and get download URL"""
     try:
-        bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"))
+        bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
         channel_id = os.getenv("TELEGRAM_CHANNEL_ID")
         
-        async with aiohttp.ClientSession() as session:
-            if file_type == "audio":
-                async with aiofiles.open(file_path, 'rb') as file:
-                    file_data = await file.read()
-                    message = await bot.send_audio(
-                        chat_id=channel_id,
-                        audio=file_data,
-                        caption="🎵 Downloaded via TaitanX API"
-                    )
-                    file_id = message.audio.file_id
-            else:  # video
-                async with aiofiles.open(file_path, 'rb') as file:
-                    file_data = await file.read()
-                    message = await bot.send_video(
-                        chat_id=channel_id,
-                        video=file_data,
-                        caption="🎬 Downloaded via TaitanX API",
-                        supports_streaming=True
-                    )
-                    file_id = message.video.file_id
-            
-            # Get file URL
-            file_info = await bot.get_file(file_id)
-            download_url = f"https://api.telegram.org/file/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/{file_info.file_path}"
-            
-            return {
-                'success': True,
-                'download_url': download_url,
-                'file_id': file_id
-            }
+        if not bot_token or not channel_id:
+            return {'success': False, 'error': 'Telegram configuration missing'}
+        
+        bot = Bot(token=bot_token)
+        
+        # Check if file exists and has reasonable size
+        if not os.path.exists(file_path):
+            return {'success': False, 'error': 'File not found after download'}
+        
+        file_size = os.path.getsize(file_path)
+        if file_size == 0:
+            return {'success': False, 'error': 'File is empty'}
+        
+        # Telegram has 50MB file size limit for bots
+        if file_size > 50 * 1024 * 1024:
+            return {'success': False, 'error': 'File too large for Telegram'}
+        
+        if file_type == "audio":
+            with open(file_path, 'rb') as file:
+                message = await bot.send_audio(
+                    chat_id=channel_id,
+                    audio=file,
+                    caption="🎵 Downloaded via TaitanX API"
+                )
+                file_id = message.audio.file_id
+        else:  # video
+            with open(file_path, 'rb') as file:
+                message = await bot.send_video(
+                    chat_id=channel_id,
+                    video=file,
+                    caption="🎬 Downloaded via TaitanX API",
+                    supports_streaming=True
+                )
+                file_id = message.video.file_id
+        
+        # Get file URL
+        file_info = await bot.get_file(file_id)
+        download_url = f"https://api.telegram.org/file/bot{bot_token}/{file_info.file_path}"
+        
+        return {
+            'success': True,
+            'download_url': download_url,
+            'file_id': file_id
+        }
             
     except Exception as e:
         logger.error(f"Telegram upload error: {e}")
@@ -93,6 +107,10 @@ async def upload_to_telegram(file_path, file_type="audio"):
 
 def format_error_response(message, file_type="Audio"):
     """Format error response"""
+    # Remove ANSI color codes from error messages
+    import re
+    message = re.sub(r'\x1b\[[0-9;]*m', '', message)
+    
     return {
         "cached": False,
         "creator": CREATOR,
@@ -135,6 +153,8 @@ def audio_endpoint():
         if not youtube_url:
             return jsonify(format_error_response("Missing url or name parameter", "Audio")), 400
         
+        logger.info(f"Processing audio request for: {youtube_url}")
+        
         # Process request asynchronously
         result = asyncio.run(process_audio_request(youtube_url, api_key, start_time))
         return jsonify(result)
@@ -167,6 +187,8 @@ def video_endpoint():
         if not youtube_url:
             return jsonify(format_error_response("Missing url or name parameter", "Video")), 400
         
+        logger.info(f"Processing video request for: {youtube_url}")
+        
         # Process request asynchronously
         result = asyncio.run(process_video_request(youtube_url, api_key, start_time))
         return jsonify(result)
@@ -184,7 +206,8 @@ async def process_audio_request(youtube_url, api_key, start_time):
         download_result = await downloader.download_audio(youtube_url, '192')
         
         if not download_result['success']:
-            RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=False)
+            user_id = KeyManager.validate_key(api_key)[1]['user_id']
+            RequestLogger.log_request(user_id, '/audio', success=False)
             return format_error_response(download_result['error'], "Audio")
         
         download_time = time.time() - download_start
@@ -200,7 +223,8 @@ async def process_audio_request(youtube_url, api_key, start_time):
         if upload_result['success']:
             # Increment request counter only on success
             KeyManager.increment_request(api_key)
-            RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=True)
+            user_id = KeyManager.validate_key(api_key)[1]['user_id']
+            RequestLogger.log_request(user_id, '/audio', success=True)
             
             total_time = time.time() - start_time
             
@@ -221,12 +245,14 @@ async def process_audio_request(youtube_url, api_key, start_time):
                 "upload_time": round(upload_time, 2)
             }
         else:
-            RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=False)
+            user_id = KeyManager.validate_key(api_key)[1]['user_id']
+            RequestLogger.log_request(user_id, '/audio', success=False)
             return format_error_response(upload_result['error'], "Audio")
             
     except Exception as e:
         logger.error(f"Audio processing error: {e}")
-        RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/audio', success=False)
+        user_id = KeyManager.validate_key(api_key)[1]['user_id']
+        RequestLogger.log_request(user_id, '/audio', success=False)
         return format_error_response(str(e), "Audio")
 
 async def process_video_request(youtube_url, api_key, start_time):
@@ -238,7 +264,8 @@ async def process_video_request(youtube_url, api_key, start_time):
         download_result = await downloader.download_video(youtube_url, 'best[height<=720]')
         
         if not download_result['success']:
-            RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=False)
+            user_id = KeyManager.validate_key(api_key)[1]['user_id']
+            RequestLogger.log_request(user_id, '/video', success=False)
             return format_error_response(download_result['error'], "Video")
         
         download_time = time.time() - download_start
@@ -254,7 +281,8 @@ async def process_video_request(youtube_url, api_key, start_time):
         if upload_result['success']:
             # Increment request counter only on success
             KeyManager.increment_request(api_key)
-            RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=True)
+            user_id = KeyManager.validate_key(api_key)[1]['user_id']
+            RequestLogger.log_request(user_id, '/video', success=True)
             
             total_time = time.time() - start_time
             
@@ -276,12 +304,14 @@ async def process_video_request(youtube_url, api_key, start_time):
                 "upload_time": round(upload_time, 2)
             }
         else:
-            RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=False)
+            user_id = KeyManager.validate_key(api_key)[1]['user_id']
+            RequestLogger.log_request(user_id, '/video', success=False)
             return format_error_response(upload_result['error'], "Video")
             
     except Exception as e:
         logger.error(f"Video processing error: {e}")
-        RequestLogger.log_request(KeyManager.validate_key(api_key)[1]['user_id'], '/video', success=False)
+        user_id = KeyManager.validate_key(api_key)[1]['user_id']
+        RequestLogger.log_request(user_id, '/video', success=False)
         return format_error_response(str(e), "Video")
 
 @app.route('/')
