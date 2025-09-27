@@ -3,6 +3,7 @@ from pymongo.errors import ConnectionFailure
 import os
 from datetime import datetime, timedelta, date
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -70,39 +71,6 @@ class UserManager:
 
 class KeyManager:
     @staticmethod
-    def generate_key(user_id, is_admin=False):
-        """Generate API key"""
-        import secrets
-        import random
-        import string
-        
-        # Generate key in Taitan{Random} format
-        random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
-        key = f"Taitan{random_part}"
-        
-        db = get_db()
-        
-        if is_admin:
-            expires_at = None  # Lifetime for admin
-        else:
-            expires_at = datetime.utcnow() + timedelta(days=7)
-        
-        key_data = {
-            "key": key,
-            "user_id": user_id,
-            "is_admin": is_admin,
-            "created_at": datetime.utcnow(),
-            "expires_at": expires_at,
-            "daily_requests": 0,
-            "total_requests": 0,
-            "last_reset": datetime.utcnow(),
-            "is_active": True
-        }
-        
-        db.api_keys.insert_one(key_data)
-        return key
-    
-    @staticmethod
     def validate_key(key):
         """Validate API key and check rate limits"""
         db = get_db()
@@ -111,6 +79,10 @@ class KeyManager:
         if not key_data:
             return False, "Invalid API key"
         
+        # Convert ObjectId to string for JSON serialization
+        if '_id' in key_data:
+            key_data['_id'] = str(key_data['_id'])
+        
         # Check expiration
         if key_data.get("expires_at") and key_data["expires_at"] < datetime.utcnow():
             db.api_keys.update_one({"key": key}, {"$set": {"is_active": False}})
@@ -118,7 +90,8 @@ class KeyManager:
         
         # Reset daily counter if new day
         today = datetime.utcnow().date()
-        last_reset_date = key_data["last_reset"].date() if isinstance(key_data["last_reset"], datetime) else key_data["last_reset"]
+        last_reset = key_data.get("last_reset", datetime.utcnow())
+        last_reset_date = last_reset.date() if isinstance(last_reset, datetime) else last_reset
         
         if last_reset_date != today:
             db.api_keys.update_one(
@@ -149,7 +122,12 @@ class KeyManager:
     def get_all_keys():
         """Get all API keys"""
         db = get_db()
-        return list(db.api_keys.find({}))
+        keys = list(db.api_keys.find({}))
+        # Convert ObjectId to string for JSON serialization
+        for key in keys:
+            if '_id' in key:
+                key['_id'] = str(key['_id'])
+        return keys
     
     @staticmethod
     def delete_key(key):
@@ -162,7 +140,12 @@ class KeyManager:
     def get_user_keys(user_id):
         """Get all keys for a user"""
         db = get_db()
-        return list(db.api_keys.find({"user_id": user_id}))
+        keys = list(db.api_keys.find({"user_id": user_id}))
+        # Convert ObjectId to string for JSON serialization
+        for key in keys:
+            if '_id' in key:
+                key['_id'] = str(key['_id'])
+        return keys
     
     @staticmethod
     def add_key(key_data):
@@ -176,7 +159,7 @@ class KeyManager:
 class RequestLogger:
     @staticmethod
     def log_request(user_id, endpoint, success=True, cached=False):
-        """Log API request - Only log successful requests"""
+        """Log API request"""
         db = get_db()
         db.requests.insert_one({
             "user_id": user_id,
