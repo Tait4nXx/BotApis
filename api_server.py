@@ -364,7 +364,6 @@ async def process_video_request(youtube_url, video_id, api_key, key_data, start_
         RequestLogger.log_request(key_data['user_id'], '/video', success=False)
         return format_error_response(str(e), "Video")
 
-# Other routes remain the same...
 @app.route('/cache/clear/<video_id>', methods=['DELETE'])
 def clear_cache(video_id):
     """Clear cache for specific video ID"""
@@ -386,7 +385,7 @@ def clear_cache(video_id):
 def cache_stats():
     """Get cache statistics"""
     try:
-        if cache_db.db:
+        if cache_db.db is not None:
             audio_count = cache_db.db.audio_cache.count_documents({})
             video_count = cache_db.db.video_cache.count_documents({})
             
