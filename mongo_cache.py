@@ -27,9 +27,13 @@ class MongoCache:
             self.client = None
             self.db = None
     
+    def is_connected(self):
+        """Check if MongoDB is connected"""
+        return self.db is not None
+    
     def get_audio_cache(self, video_id):
         """Get cached audio response for video ID"""
-        if not self.db:
+        if self.db is None:
             return None
         
         try:
@@ -44,7 +48,7 @@ class MongoCache:
     
     def get_video_cache(self, video_id):
         """Get cached video response for video ID"""
-        if not self.db:
+        if self.db is None:
             return None
         
         try:
@@ -59,7 +63,7 @@ class MongoCache:
     
     def set_audio_cache(self, video_id, response):
         """Cache audio response for video ID"""
-        if not self.db:
+        if self.db is None:
             return False
         
         try:
@@ -83,7 +87,7 @@ class MongoCache:
     
     def set_video_cache(self, video_id, response):
         """Cache video response for video ID"""
-        if not self.db:
+        if self.db is None:
             return False
         
         try:
@@ -108,7 +112,7 @@ class MongoCache:
     
     def delete_audio_cache(self, video_id):
         """Delete audio cache for video ID"""
-        if not self.db:
+        if self.db is None:
             return False
         
         try:
@@ -120,7 +124,7 @@ class MongoCache:
     
     def delete_video_cache(self, video_id):
         """Delete video cache for video ID"""
-        if not self.db:
+        if self.db is None:
             return False
         
         try:
