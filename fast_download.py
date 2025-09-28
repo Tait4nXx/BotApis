@@ -110,7 +110,8 @@ class FastDownloader:
                     'title': info.get('title', 'Unknown'),
                     'duration': info.get('duration', 0),
                     'thumbnail': info.get('thumbnail', ''),
-                    'resolution': info.get('resolution', 'Unknown') if media_type == 'video' else '192kbps'
+                    'resolution': info.get('resolution', 'Unknown') if media_type == 'video' else '192kbps',
+                    'video_id': info.get('id', '')
                 }
             return {'success': False, 'error': 'Direct download failed'}
             
@@ -218,7 +219,8 @@ class FastDownloader:
                     'title': info.get('title', 'Unknown'),
                     'duration': info.get('duration', 0),
                     'thumbnail': info.get('thumbnail', ''),
-                    'resolution': info.get('resolution', 'Unknown') if media_type == 'video' else '192kbps'
+                    'resolution': info.get('resolution', 'Unknown') if media_type == 'video' else '192kbps',
+                    'video_id': info.get('id', '')
                 }
             return {'success': False, 'error': 'Download failed'}
             
