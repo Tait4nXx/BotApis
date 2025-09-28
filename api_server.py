@@ -17,7 +17,7 @@ app = Flask(__name__)
 
 # Configuration
 CREATOR = "@Tait4nXx"
-TELEGRAM_CHANNEL = "https://t.me/VibeBots"
+TELEGRAM_CHANNEL = "https://t.me/TaitanXBots"
 TELEGRAM_BOT_TOKEN = "8403153728:AAGt5oeBupRaIfmGuyJBRHe8PA8teoKzigo"
 TELEGRAM_CHANNEL_ID = "@TaitanXApi"
 TELEGRAM_FILE_API = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}"
@@ -115,47 +115,22 @@ async def upload_to_telegram(file_path, file_type="audio"):
         logger.error(f"Telegram upload error: {e}")
         return {'success': False, 'error': str(e)}
 
-def format_duration(duration_seconds):
-    """Convert seconds to ISO 8601 duration format"""
-    if not duration_seconds:
-        return "PT0S"
-    
-    hours = int(duration_seconds // 3600)
-    minutes = int((duration_seconds % 3600) // 60)
-    seconds = int(duration_seconds % 60)
-    
-    duration_str = "PT"
-    if hours > 0:
-        duration_str += f"{hours}H"
-    if minutes > 0:
-        duration_str += f"{minutes}M"
-    if seconds > 0 or duration_str == "PT":
-        duration_str += f"{seconds}S"
-    
-    return duration_str
-
-def format_success_response(file_type, upload_result, download_result, total_time, title="Unknown"):
-    """Format success response"""
-    duration = format_duration(upload_result.get('duration', download_result.get('duration', 0)))
-    
+def format_success_response(file_type, upload_result, download_result, total_api_time, download_time, upload_time, video_id):
+    """Format success response according to desired format"""
     response = {
+        "cached": False,
         "creator": CREATOR,
+        "download_time": round(download_time, 2),
         "result": {
-            "duration": duration,
-            "file_id": upload_result.get('file_id', ''),
-            "quality": download_result.get('resolution', '720p') if file_type == "Video" else "192kbps",
-            "source": "telegram_cache",
-            "telegram_msg": {
-                "msg_id": upload_result.get('msg_id', 0),
-                "tlink": f"https://t.me/{TELEGRAM_CHANNEL_ID.replace('@', '')}/{upload_result.get('msg_id', 0)}"
-            },
+            "quality": download_result.get('resolution', '192kbps') if file_type == "Video" else "192kbps",
+            "title": download_result.get('title', 'Unknown'),
             "url": upload_result.get('download_url', ''),
-            "title": title
+            "video_id": video_id
         },
         "status": True,
-        "type": file_type,
         "telegram": TELEGRAM_CHANNEL,
-        "cached": False
+        "total_api_time": round(total_api_time, 2),
+        "upload_time": round(upload_time, 2)
     }
     
     return response
@@ -171,24 +146,20 @@ def format_cached_response(cached_response):
 def format_error_response(message, file_type="Audio"):
     """Format error response"""
     return {
+        "cached": False,
         "creator": CREATOR,
+        "download_time": 0,
         "result": {
-            "duration": "PT0S",
-            "file_id": "",
             "quality": "Unknown",
-            "source": "telegram_cache",
-            "telegram_msg": {
-                "msg_id": 0,
-                "tlink": ""
-            },
+            "title": "",
             "url": "",
-            "title": ""
+            "video_id": ""
         },
         "status": False,
-        "type": file_type,
         "telegram": TELEGRAM_CHANNEL,
-        "error": message,
-        "cached": False
+        "total_api_time": 0,
+        "upload_time": 0,
+        "error": message
     }
 
 def validate_api_key(api_key):
@@ -224,7 +195,7 @@ def audio_endpoint():
         
         video_id = extract_video_id(youtube_url)
         
-        # Check cache
+        # Check cache - only cache successful responses
         if not youtube_url.startswith('ytsearch:'):
             cached_response = cache_db.get_audio_cache(video_id)
             if cached_response:
@@ -265,7 +236,7 @@ def video_endpoint():
         
         video_id = extract_video_id(youtube_url)
         
-        # Check cache
+        # Check cache - only cache successful responses
         if not youtube_url.startswith('ytsearch:'):
             cached_response = cache_db.get_video_cache(video_id)
             if cached_response:
@@ -286,16 +257,20 @@ def video_endpoint():
 
 async def process_audio_request(youtube_url, video_id, api_key, key_data, start_time):
     """Process audio download request"""
+    download_start = time.time()
     try:
         # Download audio
         download_result = await downloader.download_audio(youtube_url, '192')
+        download_time = time.time() - download_start
         
         if not download_result['success']:
             RequestLogger.log_request(key_data['user_id'], '/audio', success=False)
             return format_error_response(f"Download failed: {download_result['error']}", "Audio")
         
+        upload_start = time.time()
         # Upload to Telegram
         upload_result = await upload_to_telegram(download_result['file_path'], "audio")
+        upload_time = time.time() - upload_start
         
         # Cleanup file
         await downloader.cleanup_file(download_result['file_path'])
@@ -304,12 +279,19 @@ async def process_audio_request(youtube_url, video_id, api_key, key_data, start_
             KeyManager.increment_request(api_key)
             RequestLogger.log_request(key_data['user_id'], '/audio', success=True)
             
-            total_time = time.time() - start_time
-            logger.info(f"🎵 Audio request completed in {total_time:.2f}s")
+            total_api_time = time.time() - start_time
             
-            response = format_success_response("Audio", upload_result, download_result, total_time, download_result.get('title', 'Unknown'))
+            response = format_success_response(
+                "Audio", 
+                upload_result, 
+                download_result, 
+                total_api_time,
+                download_time,
+                upload_time,
+                video_id
+            )
             
-            # Cache the response
+            # Cache only successful responses
             if not youtube_url.startswith('ytsearch:'):
                 cache_db.set_audio_cache(video_id, response)
                 logger.info(f"🎵 Audio response cached for video_id: {video_id}")
@@ -326,16 +308,20 @@ async def process_audio_request(youtube_url, video_id, api_key, key_data, start_
 
 async def process_video_request(youtube_url, video_id, api_key, key_data, start_time):
     """Process video download request"""
+    download_start = time.time()
     try:
         # Download video
         download_result = await downloader.download_video(youtube_url, 'best[height<=720]')
+        download_time = time.time() - download_start
         
         if not download_result['success']:
             RequestLogger.log_request(key_data['user_id'], '/video', success=False)
             return format_error_response(f"Download failed: {download_result['error']}", "Video")
         
+        upload_start = time.time()
         # Upload to Telegram
         upload_result = await upload_to_telegram(download_result['file_path'], "video")
+        upload_time = time.time() - upload_start
         
         # Cleanup file
         await downloader.cleanup_file(download_result['file_path'])
@@ -344,12 +330,19 @@ async def process_video_request(youtube_url, video_id, api_key, key_data, start_
             KeyManager.increment_request(api_key)
             RequestLogger.log_request(key_data['user_id'], '/video', success=True)
             
-            total_time = time.time() - start_time
-            logger.info(f"🎬 Video request completed in {total_time:.2f}s")
+            total_api_time = time.time() - start_time
             
-            response = format_success_response("Video", upload_result, download_result, total_time, download_result.get('title', 'Unknown'))
+            response = format_success_response(
+                "Video", 
+                upload_result, 
+                download_result, 
+                total_api_time,
+                download_time,
+                upload_time,
+                video_id
+            )
             
-            # Cache the response
+            # Cache only successful responses
             if not youtube_url.startswith('ytsearch:'):
                 cache_db.set_video_cache(video_id, response)
                 logger.info(f"🎬 Video response cached for video_id: {video_id}")
