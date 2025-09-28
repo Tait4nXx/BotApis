@@ -27,10 +27,6 @@ class MongoCache:
             self.client = None
             self.db = None
     
-    def is_connected(self):
-        """Check if MongoDB is connected"""
-        return self.db is not None
-    
     def get_audio_cache(self, video_id):
         """Get cached audio response for video ID"""
         if self.db is None:
@@ -74,7 +70,7 @@ class MongoCache:
                         "response": response,
                         "created_at": datetime.now(),
                         "title": response.get('result', {}).get('title', ''),
-                        "duration": response.get('result', {}).get('duration', '')
+                        "video_id": video_id
                     }
                 },
                 upsert=True
@@ -98,8 +94,7 @@ class MongoCache:
                         "response": response,
                         "created_at": datetime.now(),
                         "title": response.get('result', {}).get('title', ''),
-                        "duration": response.get('result', {}).get('duration', ''),
-                        "quality": response.get('result', {}).get('quality', '')
+                        "video_id": video_id
                     }
                 },
                 upsert=True
